@@ -81,7 +81,7 @@ always @(*) begin
     else if (i_type)begin //itype
         imm_sel = 3'b000; //i_type selection
         mem_to_reg = 2'b00;
-        if(fun3==3'b000 & fun7==0)begin
+        if(fun3==3'b000)begin // ADDI (Ignore fun7 because it's part of immediate)
             alu_control = 4'b0000;
         end
         else if (fun3==3'b001 & fun7==0)begin

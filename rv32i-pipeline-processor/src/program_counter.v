@@ -6,6 +6,7 @@ module pc (
     input wire next_sel,
     input wire dmem_valid,
     input wire branch_reselt,
+    input wire fuse_skip,
     input wire [31:0]next_address,
     input wire [31:0]address_in,
 

@@ -12,7 +12,6 @@ ${CORE_ROOT}/src/immediate_gen.v
 ${CORE_ROOT}/src/memory.v
 ${CORE_ROOT}/src/instruc_mem_top.v
 ${CORE_ROOT}/src/data_memory_top.v
-${CORE_ROOT}/src/Memory.v
 ${CORE_ROOT}/src/Microprocessor.v
 ${CORE_ROOT}/src/mux1_2.v
 ${CORE_ROOT}/src/mux2_4.v
@@ -26,4 +25,6 @@ ${CORE_ROOT}/src/fetch_pipe.v
 ${CORE_ROOT}/src/decode_pipe.v
 ${CORE_ROOT}/src/execute_pipe.v
 ${CORE_ROOT}/src/memstage_pipe.v
+${CORE_ROOT}/src/Memory_stage.v
+${CORE_ROOT}/src/fusionDecoder.v
 

@@ -1,0 +1,30 @@
+# Simulation outputs
+temp/
+*.vcd
+*.wdb
+*.out
+*.log
+*.jou
+*.str
+
+# Vivado files
+rv32i-vivado/.Xil/
+rv32i-vivado/rv32i-vivado.cache/
+rv32i-vivado/rv32i-vivado.hw/
+rv32i-vivado/rv32i-vivado.ip_user_files/
+rv32i-vivado/rv32i-vivado.runs/
+rv32i-vivado/rv32i-vivado.sim/
+*.backup.jou
+*.backup.log
+
+# Python
+__pycache__/
+*.pyc
+.streamlit/
+
+# Test CSV files (optional - remove these lines if you want to keep them)
+src/*.csv
+
+# OS files
+.DS_Store
+Thumbs.db

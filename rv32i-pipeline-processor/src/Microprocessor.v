@@ -1,4 +1,12 @@
-module microprocessor (
+`timescale 1ns/1ps
+
+`ifndef FUSION_ENABLE_VAL
+    `define FUSION_ENABLE_VAL 1
+`endif
+
+module microprocessor #(
+    parameter FUSION_ENABLE = `FUSION_ENABLE_VAL
+)(
     input wire clk,
     input wire rst,
     input wire [31:0]instruction
@@ -36,7 +44,9 @@ module microprocessor (
     );
 
     //CORE
-    core u_core(
+    core #(
+        .FUSION_ENABLE(FUSION_ENABLE)
+    )u_core(
         .clk(clk),
         .rst(rst),
         .instruction(instruction_data),

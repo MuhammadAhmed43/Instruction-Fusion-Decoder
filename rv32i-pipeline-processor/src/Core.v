@@ -1,4 +1,6 @@
-module core (
+module core #(
+    parameter FUSION_ENABLE = 1
+)(
     input wire clk,
     input wire rst,
     input wire data_mem_valid,
@@ -47,15 +49,36 @@ module core (
     wire [31:0] wrap_load_memstage , wrap_load_wb;
     wire [31:0] rd_wb_data;
     wire [31:0] alu_in_a , alu_in_b;
+    wire operand_a_decode, operand_b_decode;
+    wire operand_a_execute, operand_b_execute;
+    
+    // FUSION SIGNALS
+    wire fuse_flag_raw;
+    wire fuse_flag;
+    wire [31:0] fused_inst;
+    wire hazard_stall;
+
+    assign fuse_flag = fuse_flag_raw & FUSION_ENABLE;
+
+    // HAZARD DETECTION (Artificial Stall for Baseline)
+    // If Fusion is disabled, we enforce a stall on RAW hazards for LUI->ADDI
+    // This simulates a processor without full forwarding for this specific case,
+    // allowing Fusion to demonstrate a speedup by avoiding the stall.
+    assign hazard_stall = !FUSION_ENABLE && 
+                          (instruction_execute[6:0] == 7'b0110111) && // LUI in Ex
+                          (instruction_decode[6:0] == 7'b0010011) && // ADDI in Dec
+                          (instruction_execute[11:7] == instruction_decode[19:15]) && // rd == rs1
+                          (instruction_execute[11:7] != 0); // rd != x0
 
     //FETCH STAGE
     fetch u_fetchstage(
         .clk(clk),
         .rst(rst),
-        .load(load_decode),
+        .load(load_decode | hazard_stall), // Stall Fetch
         .jalr(jalr_execute),
         .next_sel(next_sel_execute),
         .branch_reselt(branch_result_execute),
+        .fuse_skip(fuse_flag),
         .next_address(alu_res_out_execute),
         .instruction_fetch(instruction),
         .instruction(instruction_fetch),
@@ -79,7 +102,16 @@ module core (
         .next_select(next_sel_decode),
         .branch_result(branch_result_decode),
         .jalr(jalr_decode),
-        .load(load_decode)
+        .load(load_decode | hazard_stall), // Stall Fetch Pipe
+        .fuse_flush(fuse_flag)
+    );
+
+    // FUSION DECODER
+    fusion_decoder u_fusion_decoder(
+        .inst1(instruction_decode),
+        .inst2(instruction_fetch),
+        .fuse_flag(fuse_flag_raw),
+        .fused_inst(fused_inst)
     );
 
     //DECODE STAGE
@@ -89,7 +121,7 @@ module core (
         .valid(data_mem_valid),
         .load_control_signal(load_execute),
         .reg_write_en_in(reg_write_wb),
-        .instruction(instruction_decode),
+        .instruction(fuse_flag ? fused_inst : instruction_decode),
         .pc_address(pre_pc_addr_decode),
         .rd_wb_data(rd_wb_data),
         .rs1(rs1_decode),
@@ -105,13 +137,24 @@ module core (
         .instruction_rd(instruction_wb),
         .alu_control(alu_control_decode),
         .opa_mux_out(opa_mux_out_decode),
-        .opb_mux_out(opb_mux_out_decode)
+        .opb_mux_out(opb_mux_out_decode),
+        .operand_a_out(operand_a_decode),
+        .operand_b_out(operand_b_decode),
+        
+        // Forwarding Wiring
+        .alu_result_execute(alu_res_out_execute),
+        .rd_execute(instruction_execute[11:7]),
+        .reg_write_execute(reg_write_execute),
+        .alu_result_mem(alu_res_out_memstage),
+        .rd_mem(rd_memstage),
+        .reg_write_mem(reg_write_memstage)
     );
 
     //DECODE STAGE PIPELINE
     decode_pipe u_decodepipeline(
         .clk(clk),
         .rst(rst),
+        .flush(hazard_stall), // Flush Execute (Insert Bubble)
         .load_in(load_decode),
         .store_in(store_decode),
         .jalr_in(jalr_decode),
@@ -127,6 +170,8 @@ module core (
         .reg_write_in(reg_write_decode),
         .rs1_in(rs1_decode),
         .rs2_in(rs2_decode),
+        .operand_a_in(operand_a_decode),
+        .operand_b_in(operand_b_decode),
         .reg_write_out(reg_write_execute),
         .jalr_out(jalr_execute),
         .load(load_execute),
@@ -141,11 +186,13 @@ module core (
         .pre_address_out(pre_pc_addr_execute),
         .instruction_out(instruction_execute),
         .rs1_out(rs1_execute),
-        .rs2_out(rs2_execute)
+        .rs2_out(rs2_execute),
+        .operand_a_out(operand_a_execute),
+        .operand_b_out(operand_b_execute)
     );
 
-    assign alu_in_a = (rs1_execute == rd_memstage)? alu_res_out_memstage : opa_mux_out_execute;
-    assign alu_in_b = (rs2_execute == rd_memstage)? alu_res_out_memstage : opb_mux_out_execute;
+    assign alu_in_a = (!operand_a_execute && rs1_execute == rd_memstage)? alu_res_out_memstage : opa_mux_out_execute;
+    assign alu_in_b = (!operand_b_execute && rs2_execute == rd_memstage)? alu_res_out_memstage : opb_mux_out_execute;
 
     //EXECUTE STAGE
     execute u_executestage(

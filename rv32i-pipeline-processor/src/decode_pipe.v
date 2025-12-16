@@ -1,6 +1,7 @@
 module  decode_pipe(
   input wire clk,
   input wire rst,
+  input wire flush,
   input wire load_in,
   input wire store_in,
   input wire jalr_in,
@@ -16,6 +17,8 @@ module  decode_pipe(
   input wire [31:0] opb_data_in,
   input wire [31:0] pre_address_in,
   input wire [31:0] instruction_in,
+  input wire operand_a_in,
+  input wire operand_b_in,
 
   output wire load,
   output wire store,
@@ -31,7 +34,9 @@ module  decode_pipe(
   output wire [31:0] opb_mux_out,
   output wire [31:0] opb_data_out,
   output wire [31:0] pre_address_out,
-  output wire [31:0] instruction_out
+  output wire [31:0] instruction_out,
+  output wire operand_a_out,
+  output wire operand_b_out
  );
 
   reg l,s,nextsel,branch_res,jalr;
@@ -41,6 +46,7 @@ module  decode_pipe(
   reg [4:0] rs1;
   reg [4:0] rs2;
   reg [31:0] opa_mux,opb_mux,opb_data,pre_address,instruction;
+  reg op_a_sel, op_b_sel;
 
   always @ (posedge clk or negedge rst) begin
     if (!rst) begin
@@ -59,6 +65,27 @@ module  decode_pipe(
       reg_write   <= 0;
       rs1         <= 0;
       rs2         <= 0;
+      op_a_sel    <= 0;
+      op_b_sel    <= 0;
+    end
+    else if (flush) begin
+      l           <= 0;
+      s           <= 0;
+      jalr        <= 0;
+      nextsel     <= 0;
+      branch_res  <= 0;
+      mem_reg     <= 0;
+      alu_con     <= 0;
+      opa_mux     <= 0;
+      opb_mux     <= 0;
+      opb_data    <= 0;
+      pre_address <= 0;
+      instruction <= 32'h00000013; // NOP
+      reg_write   <= 0;
+      rs1         <= 0;
+      rs2         <= 0;
+      op_a_sel    <= 0;
+      op_b_sel    <= 0;
     end
     else begin
       l           <= load_in;
@@ -76,6 +103,8 @@ module  decode_pipe(
       reg_write   <= reg_write_in;
       rs1         <= rs1_in;
       rs2         <= rs2_in;
+      op_a_sel    <= operand_a_in;
+      op_b_sel    <= operand_b_in;
     end
   end
 
@@ -94,4 +123,6 @@ module  decode_pipe(
   assign opb_data_out     = opb_data;
   assign instruction_out  = instruction;
   assign pre_address_out  = pre_address;
+  assign operand_a_out    = op_a_sel;
+  assign operand_b_out    = op_b_sel;
 endmodule

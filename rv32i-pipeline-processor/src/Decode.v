@@ -8,6 +8,14 @@ module decode (
     input wire [31:0] pc_address,
     input wire [31:0] rd_wb_data,
     input wire [31:0] instruction_rd,
+    
+    // Forwarding Inputs
+    input wire [31:0] alu_result_execute,
+    input wire [4:0]  rd_execute,
+    input wire        reg_write_execute,
+    input wire [31:0] alu_result_mem,
+    input wire [4:0]  rd_mem,
+    input wire        reg_write_mem,
 
     output wire load,
     output wire store,
@@ -20,7 +28,9 @@ module decode (
     output wire [4:0]  rs1 , rs2,
     output wire [31:0] opb_data,
     output wire [31:0] opa_mux_out,
-    output wire [31:0] opb_mux_out
+    output wire [31:0] opb_mux_out,
+    output wire operand_a_out,
+    output wire operand_b_out
     );
 
     wire branch;
@@ -30,6 +40,9 @@ module decode (
     wire [31:0] op_a , op_b;
     wire [31:0] imm_mux_out;
     wire [31:0] i_immo , s_immo , sb_immo , uj_immo , u_immo;
+    
+    reg [31:0] branch_op_a;
+    reg [31:0] branch_op_b;
 
     // CONTROL UNIT
     controlunit u_cu0 
@@ -108,12 +121,36 @@ module decode (
         .out(opb_mux_out)
     );
 
+    //BRANCH FORWARDING LOGIC
+    always @(*) begin
+        // Forwarding for Operand A (RS1)
+        if (reg_write_execute && (rd_execute != 0) && (rd_execute == instruction[19:15])) begin
+            branch_op_a = alu_result_execute;
+        end else if (reg_write_mem && (rd_mem != 0) && (rd_mem == instruction[19:15])) begin
+            branch_op_a = alu_result_mem;
+        end else begin
+            branch_op_a = op_a;
+        end
+
+        // Forwarding for Operand B (RS2)
+        if (reg_write_execute && (rd_execute != 0) && (rd_execute == instruction[24:20])) begin
+            branch_op_b = alu_result_execute;
+        end else if (reg_write_mem && (rd_mem != 0) && (rd_mem == instruction[24:20])) begin
+            branch_op_b = alu_result_mem;
+        end else begin
+            branch_op_b = op_b;
+        end
+    end
+
     //BRANCH
     branch u_branch0(
         .en(branch),
-        .op_a(op_a),
-        .op_b(op_b),
+        .op_a(branch_op_a),
+        .op_b(branch_op_b),
         .fun3(instruction[14:12]),
         .result(branch_result)
     );
+
+    assign operand_a_out = operand_a;
+    assign operand_b_out = operand_b;
 endmodule
