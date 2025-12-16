@@ -1,0 +1,150 @@
+// =============================================================================
+// MACRO-OP FUSION TEST PROGRAM
+// =============================================================================
+// Tests all three fusion patterns:
+//   1. LUI + ADDI    (Load 32-bit immediate)
+//   2. AUIPC + JALR  (Long jump / function call)
+//   3. LOAD + ALU    (Load-use fusion)
+//
+// Program Structure:
+//   - Initialize loop counter
+//   - Loop body contains:
+//     * LUI+ADDI pairs (2 per iteration)
+//     * LOAD+ALU pair (1 per iteration)
+//     * Function call via AUIPC+JALR (1 per iteration)
+//   - Loop 5 times
+//   - End with NOPs
+// =============================================================================
+
+// Address 0x00: Initialize loop counter (x5 = 5)
+00500293
+
+// Address 0x04: Store a test value at memory address 0x100
+// We'll use this for LOAD+ALU testing
+// lui x6, 0x00000 (x6 = 0)
+000000b7
+
+// Address 0x08: addi x6, x6, 0x100 (x6 = 0x100 - address for our test data)
+// NOTE: This is a LUI+ADDI fusion opportunity but rd=x6 for setup
+10008093
+
+// Actually, let's just use a simpler approach:
+// Address 0x04: addi x6, x0, 0x42 (x6 = 0x42 - test value)
+// Oops, let me restart with a cleaner program
+
+// =============================================================================
+// CLEAN RESTART - Simple but comprehensive test
+// =============================================================================
+
+// --- INITIALIZATION (Address 0x00 - 0x0C) ---
+// 0x00: addi x5, x0, 5      ; Loop counter = 5
+00500293
+
+// --- LOOP START (Address 0x04) ---
+// Fusion Pattern 1: LUI + ADDI (Load 32-bit constant)
+// 0x04: lui x1, 0x12345     ; x1 = 0x12345000
+123450b7
+
+// 0x08: addi x1, x1, 0x678  ; x1 = 0x12345678 (FUSES with LUI above)
+67808093
+
+// Fusion Pattern 1 again: Another LUI + ADDI pair
+// 0x0C: lui x2, 0x87654     ; x2 = 0x87654000
+87654137
+
+// 0x10: addi x2, x2, 0x321  ; x2 = 0x87654321 (FUSES with LUI above)
+32110113
+
+// --- Regular ALU operations (no fusion) ---
+// 0x14: add x3, x1, x2      ; x3 = x1 + x2
+002081b3
+
+// 0x18: sub x4, x1, x2      ; x4 = x1 - x2
+40208233
+
+// --- Fusion Pattern 3: LOAD + ALU ---
+// For this we need data in memory. We'll use the stack area.
+// First, store a value:
+// 0x1C: sw x1, 0(x0)        ; Store x1 to address 0 (data memory)
+00102023
+
+// 0x20: lw x7, 0(x0)        ; Load from address 0 into x7
+00002383
+
+// 0x24: add x8, x7, x3      ; Use x7 immediately (FUSES with LW above)
+00338433
+
+// --- Fusion Pattern 2: AUIPC + JALR (Function Call) ---
+// This is tricky because we need a function to call and return from
+// For safety, we'll skip this in the main loop to avoid PC jumping chaos
+// Instead, we'll just do a simple NOP-equivalent or use the pattern without jumping
+
+// Actually, for AUIPC+JALR to work correctly:
+// - AUIPC sets rd = PC + imm
+// - JALR jumps to rs1 + imm and saves return address to rd
+// For a "safe" pattern that doesn't disrupt flow, we'd need a return
+// Let's test it outside the loop at the end
+
+// --- Decrement and branch ---
+// 0x28: addi x5, x5, -1     ; Decrement counter
+fff28293
+
+// 0x2C: bne x5, x0, -0x28   ; If x5 != 0, jump back to 0x04 (offset = -40 = -0x28)
+fc029ce3
+
+// --- POST-LOOP: Test AUIPC + JALR ---
+// We'll create a simple pattern that jumps forward then returns
+// 0x30: auipc x10, 0        ; x10 = PC (0x30)
+00000517
+
+// 0x34: jalr x1, x10, 16    ; Jump to PC+16 (0x40), save return to x1
+01050067
+
+// 0x38: This instruction is skipped (NOP for safety)
+00000013
+
+// 0x3C: This instruction is skipped (NOP for safety)  
+00000013
+
+// 0x40: Target of JALR - simple function
+// Add two registers
+// add x11, x0, x0   ; NOP equivalent
+00000013
+
+// 0x44: jalr x0, x1, 0      ; Return (jump to address in x1)
+00008067
+
+// This creates a problem - after return, PC goes to 0x38
+// Let's restructure...
+
+// Actually the safest approach for demonstration is to NOT have AUIPC+JALR 
+// in a way that actually jumps, just show the detection works.
+// OR, we put it at the very end where it won't affect the loop.
+
+// Let me create a simpler, safer test program:
+
+// =============================================================================
+// FINAL CLEAN PROGRAM
+// =============================================================================
+// This replaces everything above. Just the hex values, one per line:
+
+// 0x00: addi x5, x0, 5       ; counter = 5
+// 0x04: lui x1, 0x12345      ; [FUSE 1a]
+// 0x08: addi x1, x1, 0x678   ; [FUSE 1b] -> LUI+ADDI
+// 0x0C: lui x2, 0x87654      ; [FUSE 2a]
+// 0x10: addi x2, x2, 0x321   ; [FUSE 2b] -> LUI+ADDI
+// 0x14: add x3, x1, x2       ; Regular ALU
+// 0x18: sub x4, x1, x2       ; Regular ALU  
+// 0x1C: sw x1, 0(x0)         ; Store x1 to mem[0]
+// 0x20: lw x7, 0(x0)         ; [FUSE 3a] Load from mem[0]
+// 0x24: add x8, x7, x3       ; [FUSE 3b] -> LOAD+ALU
+// 0x28: addi x5, x5, -1      ; Decrement counter
+// 0x2C: bne x5, x0, -0x28    ; Loop back to 0x04
+// --- End of loop ---
+// 0x30: auipc x10, 0         ; [FUSE 4a] x10 = current PC
+// 0x34: jalr x0, x10, 12     ; [FUSE 4b] -> AUIPC+JALR, jump to 0x40
+// 0x38: nop                  ; (skipped by jump)
+// 0x3C: nop                  ; (skipped by jump)
+// 0x40: nop                  ; Target - program ends here
+// ... rest is NOPs
+

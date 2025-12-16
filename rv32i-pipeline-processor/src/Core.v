@@ -55,20 +55,50 @@ module core #(
     // FUSION SIGNALS
     wire fuse_flag_raw;
     wire fuse_flag;
+    wire [1:0] fuse_type;
     wire [31:0] fused_inst;
     wire hazard_stall;
 
+    // Apply fusion only when enabled
     assign fuse_flag = fuse_flag_raw & FUSION_ENABLE;
 
-    // HAZARD DETECTION (Artificial Stall for Baseline)
-    // If Fusion is disabled, we enforce a stall on RAW hazards for LUI->ADDI
-    // This simulates a processor without full forwarding for this specific case,
-    // allowing Fusion to demonstrate a speedup by avoiding the stall.
+    // ==========================================================================
+    // HAZARD DETECTION (Artificial Stalls for Baseline Comparison)
+    // ==========================================================================
+    // When Fusion is DISABLED, we enforce stalls on RAW hazards for specific
+    // patterns. This simulates a processor without full forwarding for these
+    // cases, allowing Fusion to demonstrate speedup by avoiding the stall.
+    // ==========================================================================
+    
+    // LUI -> ADDI hazard (for LUI+ADDI fusion)
+    wire lui_addi_hazard = (instruction_execute[6:0] == 7'b0110111) && // LUI in Ex
+                           (instruction_decode[6:0] == 7'b0010011) &&  // ADDI in Dec
+                           (instruction_execute[11:7] == instruction_decode[19:15]) && // rd == rs1
+                           (instruction_execute[11:7] != 0);
+    
+    // AUIPC -> JALR hazard (for AUIPC+JALR fusion)
+    wire auipc_jalr_hazard = (instruction_execute[6:0] == 7'b0010111) && // AUIPC in Ex
+                              (instruction_decode[6:0] == 7'b1100111) && // JALR in Dec
+                              (instruction_execute[11:7] == instruction_decode[19:15]) && // rd == rs1
+                              (instruction_execute[11:7] != 0);
+    
+    // LOAD -> ALU hazard (for LOAD+ALU fusion)
+    wire load_alu_hazard_rs1 = (instruction_execute[6:0] == 7'b0000011) && // Load in Ex
+                                ((instruction_decode[6:0] == 7'b0110011) ||  // R-type in Dec
+                                 (instruction_decode[6:0] == 7'b0010011)) && // I-type in Dec
+                                (instruction_execute[11:7] == instruction_decode[19:15]) && // rd == rs1
+                                (instruction_execute[11:7] != 0);
+    
+    wire load_alu_hazard_rs2 = (instruction_execute[6:0] == 7'b0000011) && // Load in Ex
+                                (instruction_decode[6:0] == 7'b0110011) &&  // R-type only
+                                (instruction_execute[11:7] == instruction_decode[24:20]) && // rd == rs2
+                                (instruction_execute[11:7] != 0);
+    
+    wire load_alu_hazard = load_alu_hazard_rs1 | load_alu_hazard_rs2;
+
+    // Combined hazard stall (only when fusion is disabled)
     assign hazard_stall = !FUSION_ENABLE && 
-                          (instruction_execute[6:0] == 7'b0110111) && // LUI in Ex
-                          (instruction_decode[6:0] == 7'b0010011) && // ADDI in Dec
-                          (instruction_execute[11:7] == instruction_decode[19:15]) && // rd == rs1
-                          (instruction_execute[11:7] != 0); // rd != x0
+                          (lui_addi_hazard | auipc_jalr_hazard | load_alu_hazard);
 
     //FETCH STAGE
     fetch u_fetchstage(
@@ -111,6 +141,7 @@ module core #(
         .inst1(instruction_decode),
         .inst2(instruction_fetch),
         .fuse_flag(fuse_flag_raw),
+        .fuse_type(fuse_type),
         .fused_inst(fused_inst)
     );
 

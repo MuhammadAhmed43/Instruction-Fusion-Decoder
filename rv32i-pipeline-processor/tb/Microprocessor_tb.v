@@ -21,7 +21,9 @@ module microprocessor_tb();
         
         // Open a log file for the Python GUI to read
         log_file = $fopen("temp/simulation.log", "w");
-        $fwrite(log_file, "Time,PC,Instruction,Reset,FuseFlag\n");
+        // CSV Header: Time, PC, Instruction, Reset, FuseFlag, FuseType
+        // FuseType: 00=none, 01=LUI+ADDI, 10=AUIPC+JALR, 11=LOAD+ALU
+        $fwrite(log_file, "Time,PC,Instruction,Reset,FuseFlag,FuseType\n");
 
         rst = 1; // Start inactive
         #10;
@@ -38,7 +40,13 @@ module microprocessor_tb();
     // Monitor block to write to the log file every cycle
     always @(posedge clk) begin
         if (rst) begin
-            $fwrite(log_file, "%0d,%h,%h,%b,%b\n", $time, u_microprocessor0.u_core.pc_address, u_microprocessor0.u_core.instruction_decode, rst, u_microprocessor0.u_core.fuse_flag);
+            $fwrite(log_file, "%0d,%h,%h,%b,%b,%b\n", 
+                $time, 
+                u_microprocessor0.u_core.pc_address, 
+                u_microprocessor0.u_core.instruction_decode, 
+                rst, 
+                u_microprocessor0.u_core.fuse_flag,
+                u_microprocessor0.u_core.fuse_type);
         end
     end
 
