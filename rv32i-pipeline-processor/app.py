@@ -17,14 +17,43 @@ FUSED_CSV_PATH = os.path.join(PROJECT_ROOT, "temp", "fused_execution.csv")
 
 st.set_page_config(page_title="RV32I Multi-Fusion Analytics", layout="wide")
 
-st.title("⚡ RV32I Multi-Pattern Macro-Op Fusion Analytics")
+# Centered, styled title using HTML
 st.markdown("""
-This dashboard compares the performance of the **Standard RV32I Pipeline** vs. the **Fused Pipeline**.
-It supports **three fusion patterns**:
-- **LUI + ADDI** → Load 32-bit immediate constant
-- **AUIPC + JALR** → Long jump / function call
-- **LOAD + ALU** → Load-use fusion (eliminates data hazard stall)
-""")
+    <div style="text-align: center; padding: 20px 0; margin-bottom: 20px;">
+        <h1 style="
+            background: linear-gradient(to right, #00d4ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-size: 3em;
+            font-weight: 800;
+            margin: 0;
+            text-shadow: 0 0 30px rgba(0, 212, 255, 0.3);
+        ">RV32I Multi-Pattern Micro-Op Fusion Analytics</h1>
+    </div>
+""", unsafe_allow_html=True)
+st.markdown("""
+<div style="background: linear-gradient(145deg, #1e1e2f, #252540); padding: 20px; border-radius: 12px; border-left: 6px solid #00d4ff; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+    <h3 style="color: #ffffff; margin-top: 0; margin-bottom: 10px; font-weight: 600;">🚀 Pipeline Performance Analysis</h3>
+    <p style="color: #cad1d9; line-height: 1.6;">
+        This dashboard benchmarks the <b>Standard RV32I Pipeline</b> against the <b>Fused Pipeline</b>. 
+        Micro-Op Fusion combines adjacent instructions into a single operation, increasing throughput and saving cycles.
+    </p>
+    <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-top: 15px;">
+        <div style="flex: 1; background: #2d2d44; padding: 12px; border-radius: 8px; border: 1px solid #444;">
+            <p style="color: #00d4ff; font-weight: bold; margin: 0;">LUI + ADDI</p>
+            <p style="color: #8899a6; font-size: 0.9em; margin: 5px 0 0 0;">32-bit Constants</p>
+        </div>
+        <div style="flex: 1; background: #2d2d44; padding: 12px; border-radius: 8px; border: 1px solid #444;">
+            <p style="color: #ffcc00; font-weight: bold; margin: 0;">AUIPC + JALR</p>
+            <p style="color: #8899a6; font-size: 0.9em; margin: 5px 0 0 0;">Function Calls</p>
+        </div>
+        <div style="flex: 1; background: #2d2d44; padding: 12px; border-radius: 8px; border: 1px solid #444;">
+            <p style="color: #00ff88; font-weight: bold; margin: 0;">LOAD + ALU</p>
+            <p style="color: #8899a6; font-size: 0.9em; margin: 5px 0 0 0;">Zero-Stall Load-Use</p>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # --- Assembler (Mini) ---
 def run_assembler(asm_text):
@@ -78,6 +107,21 @@ def run_assembler(asm_text):
                 rs1 = int(parts[2].replace("x", ""))
                 rs2 = int(parts[3].replace("x", ""))
                 val = (0x20 << 25) | (rs2 << 20) | (rs1 << 15) | (0 << 12) | (rd << 7) | 0x33
+            elif instr == "and":
+                rd = int(parts[1].replace("x", ""))
+                rs1 = int(parts[2].replace("x", ""))
+                rs2 = int(parts[3].replace("x", ""))
+                val = (0 << 25) | (rs2 << 20) | (rs1 << 15) | (0x7 << 12) | (rd << 7) | 0x33
+            elif instr == "or":
+                rd = int(parts[1].replace("x", ""))
+                rs1 = int(parts[2].replace("x", ""))
+                rs2 = int(parts[3].replace("x", ""))
+                val = (0 << 25) | (rs2 << 20) | (rs1 << 15) | (0x6 << 12) | (rd << 7) | 0x33
+            elif instr == "xor":
+                rd = int(parts[1].replace("x", ""))
+                rs1 = int(parts[2].replace("x", ""))
+                rs2 = int(parts[3].replace("x", ""))
+                val = (0 << 25) | (rs2 << 20) | (rs1 << 15) | (0x4 << 12) | (rd << 7) | 0x33
             elif instr == "lw":
                 # lw rd, offset(rs1)
                 rd = int(parts[1].replace("x", ""))
@@ -252,6 +296,8 @@ def analyze_performance(df, label):
         instr_count = 0
 
     # 2. Count Fusion Hits by Type (Handle 'x' strings and binary format)
+    # IMPORTANT: Count TRANSITIONS (0→1), not total cycles where flag=1
+    # This prevents over-counting during pipeline stalls
     fusion_hits = 0
     fusion_lui_addi = 0
     fusion_auipc_jalr = 0
@@ -259,18 +305,24 @@ def analyze_performance(df, label):
     
     if 'FuseFlag' in effective_df.columns:
         # Coerce to numeric, turn errors/'x' to 0
-        fusion_flags = pd.to_numeric(effective_df['FuseFlag'], errors='coerce').fillna(0)
-        fusion_hits = int(fusion_flags.sum())
+        fusion_flags = pd.to_numeric(effective_df['FuseFlag'], errors='coerce').fillna(0).astype(int)
+        
+        # Detect rising edges (transitions from 0 to 1)
+        # A fusion event is when fuse_flag goes from 0→1 (or from initial state to 1)
+        prev_flags = fusion_flags.shift(1).fillna(0).astype(int)
+        fusion_transitions = (fusion_flags == 1) & (prev_flags == 0)
+        
+        fusion_hits = int(fusion_transitions.sum())
         
         # Parse FuseType if available
         if 'FuseType' in effective_df.columns:
             # FuseType might be read as integer (1, 10, 11) or string ('01', '10', '11')
             # Convert to string and zero-pad to 2 digits for consistent comparison
             fuse_types = effective_df['FuseType'].apply(lambda x: str(x).zfill(2) if pd.notna(x) else '00')
-            # Count each type: 01=LUI+ADDI, 10=AUIPC+JALR, 11=LOAD+ALU
-            fusion_lui_addi = len(fuse_types[(fusion_flags == 1) & (fuse_types == '01')])
-            fusion_auipc_jalr = len(fuse_types[(fusion_flags == 1) & (fuse_types == '10')])
-            fusion_load_alu = len(fuse_types[(fusion_flags == 1) & (fuse_types == '11')])
+            # Count each type at transition points only: 01=LUI+ADDI, 10=AUIPC+JALR, 11=LOAD+ALU
+            fusion_lui_addi = len(fuse_types[fusion_transitions & (fuse_types == '01')])
+            fusion_auipc_jalr = len(fuse_types[fusion_transitions & (fuse_types == '10')])
+            fusion_load_alu = len(fuse_types[fusion_transitions & (fuse_types == '11')])
         else:
             # Old format without FuseType - assume all are LUI+ADDI
             fusion_lui_addi = fusion_hits
@@ -312,10 +364,19 @@ col1, col2 = st.columns([1, 2])
 with col1:
     st.subheader("📝 Assembly Input")
     default_asm = """// Multi-Pattern Fusion Benchmark
-// Tests: LUI+ADDI, LOAD+ALU, AUIPC+JALR
+// Tests: LUI+ADDI, LOAD+ALU (all ALU ops), AUIPC+JALR
 
-// Initialize loop counter (x5 = 5)
+// Initialize base values
 addi x5, x0, 5
+addi x20, x0, 0x55
+addi x21, x0, 0xAA
+
+// Store some test values to memory
+sw x20, 0(x0)
+sw x21, 4(x0)
+sw x20, 8(x0)
+sw x21, 12(x0)
+sw x20, 16(x0)
 
 loop:
 // Pattern 1: LUI + ADDI (Load 32-bit immediate)
@@ -326,21 +387,40 @@ addi x1, x1, 0x678
 lui x2, 0x87654000
 addi x2, x2, 0x321
 
-// Normal ALU Ops
+// Normal ALU Ops (no fusion)
 add x3, x1, x2
 sub x4, x1, x2
 
-// Pattern 3: LOAD + ALU (Load-Use)
-sw x1, 0(x0)
-lw x7, 0(x0)
-add x8, x7, x3
+// ============================================
+// Pattern 3: LOAD + ALU Fusion Tests
+// Each load's rd is used as rs1 in the next ALU
+// ============================================
+
+// Test #6: LOAD + ADD
+lw x9, 0(x0)
+add x6, x9, x3
+
+// Test #7: LOAD + SUB
+lw x10, 4(x0)
+sub x7, x10, x4
+
+// Test #8: LOAD + AND
+lw x11, 8(x0)
+and x8, x11, x1
+
+// Test #9: LOAD + OR
+lw x12, 12(x0)
+or x13, x12, x2
+
+// Test #10: LOAD + XOR
+lw x14, 16(x0)
+xor x15, x14, x3
 
 // Decrement and Branch
 addi x5, x5, -1
 bne x5, x0, loop
 
 // Pattern 2: AUIPC + JALR (Long Jump)
-// This jumps forward to skip some NOPs
 auipc x10, 0
 jalr x0, x10, 12
 
@@ -367,7 +447,7 @@ nop
             st.session_state['df_base'] = df_base
             st.session_state['df_fused'] = df_fused
             st.success("Comparison Complete!")
-            st.info(f"📁 CSV logs saved to:\n• temp/baseline_execution.csv\n• temp/fused_execution.csv")
+            # st.info(f"📁 CSV logs saved to:\n• temp/baseline_execution.csv\n• temp/fused_execution.csv")
 
 with col2:
     if 'res_base' in st.session_state:
@@ -375,7 +455,12 @@ with col2:
         fused = st.session_state['res_fused']
         
         # --- Hero Metrics ---
-        st.subheader("🚀 Performance Summary")
+        # --- Hero Metrics ---
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #1f2937 0%, #111827 100%); padding: 12px 20px; border-radius: 10px; border-left: 5px solid #00d4ff; margin-bottom: 20px;">
+            <h2 style="color: white; margin: 0; font-size: 1.5em;">🚀 Performance Summary</h2>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Speedup Calculation
         speedup = 0.0
@@ -456,7 +541,12 @@ with col2:
         st.markdown("---")
         
         # --- Detailed Metrics Comparison ---
-        st.subheader("📊 Detailed Metrics")
+        # --- Detailed Metrics ---
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #1f2937 0%, #111827 100%); padding: 12px 20px; border-radius: 10px; border-left: 5px solid #ffcc00; margin: 30px 0 20px 0;">
+            <h2 style="color: white; margin: 0; font-size: 1.5em;">📊 Detailed Metrics</h2>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Calculate NORMALIZED metrics - use baseline instruction count as "work done" for BOTH
         # This is the FAIR comparison because both execute the same program
@@ -500,7 +590,12 @@ with col2:
         m8.metric("🔥 Fusion Events", f"{fused['FusionHits']}")
         
         # Row 3: Raw metrics (actual fetched instructions) - for transparency
-        st.markdown("**📋 Raw Pipeline Metrics (Actual Instructions Fetched)**")
+        # Row 3: Raw metrics (actual fetched instructions) - for transparency
+        st.markdown("""
+        <div style="margin-top: 20px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #333;">
+            <h3 style="color: #ccc; margin: 0;">📋 Raw Pipeline Metrics (Actual Instructions Fetched)</h3>
+        </div>
+        """, unsafe_allow_html=True)
         st.markdown(f"""
         <div style="background: #2d1a1a; padding: 8px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #ff6b6b; font-size: 0.85em;">
             <b>⚠️ Note:</b> Fused pipeline fetches <b>fewer</b> instructions ({fused['Instructions']} vs {base['Instructions']}) 
@@ -517,7 +612,13 @@ with col2:
         
         # --- Summary Table ---
         st.markdown("---")
-        st.subheader("📋 Comprehensive Performance Summary")
+        # --- Summary Table ---
+        st.markdown("---")
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #1f2937 0%, #111827 100%); padding: 12px 20px; border-radius: 10px; border-left: 5px solid #00ff88; margin-bottom: 20px;">
+            <h2 style="color: white; margin: 0; font-size: 1.5em;">📋 Comprehensive Performance Summary</h2>
+        </div>
+        """, unsafe_allow_html=True)
         
         st.markdown("""
         <div style="background: #1a2d1a; padding: 10px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #00ff88; font-size: 0.85em;">
@@ -1319,16 +1420,35 @@ st.markdown("---")
 # =============================================================================
 # IoT DEVICE SIMULATION SECTION
 # =============================================================================
-st.header("🌐 Real-World Application: IoT Sensor Node Simulation")
-
 st.markdown("""
-This section demonstrates how **Macro-Op Fusion** benefits a real-world IoT device scenario.
-We simulate a **Smart Temperature Sensor Node** that continuously:
-1. **Reads sensor data** (LOAD operations)
-2. **Processes the readings** (ALU operations for averaging, threshold checking)
-3. **Sends alerts** (Function calls via JALR when thresholds exceeded)
-4. **Updates display** (32-bit constant loading for memory-mapped I/O)
-""")
+<div style="background: linear-gradient(145deg, #112211, #1a331a); padding: 25px; border-radius: 12px; border: 1px solid #00ff88; margin-bottom: 30px; box-shadow: 0 4px 12px rgba(0, 255, 136, 0.1);">
+    <div style="display: flex; align-items: center; margin-bottom: 15px;">
+        <span style="font-size: 2em; margin-right: 15px;">🌐</span>
+        <div>
+            <h2 style="color: #00ff88; margin: 0; font-size: 1.6em;">Real-World Application: IoT Sensor Node</h2>
+            <p style="color: #88ccaa; margin: 5px 0 0 0;">Simulating a Smart Temperature Sensor maximizing battery life with Micro-Op fusion.</p>
+        </div>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 15px; margin-top: 20px;">
+        <div style="background: #0f2215; padding: 15px; border-radius: 10px; border-left: 4px solid #00d4ff;">
+            <p style="color: #fff; font-weight: bold; margin: 0;">📡 1. Read Data</p>
+            <p style="color: #aaa; font-size: 0.9em; margin-top: 5px;">LOAD Operations</p>
+        </div>
+        <div style="background: #0f2215; padding: 15px; border-radius: 10px; border-left: 4px solid #ffcc00;">
+            <p style="color: #fff; font-weight: bold; margin: 0;">⚙️ 2. Process</p>
+            <p style="color: #aaa; font-size: 0.9em; margin-top: 5px;">ALU Averaging</p>
+        </div>
+        <div style="background: #0f2215; padding: 15px; border-radius: 10px; border-left: 4px solid #ff6b6b;">
+            <p style="color: #fff; font-weight: bold; margin: 0;">🚨 3. Alert</p>
+            <p style="color: #aaa; font-size: 0.9em; margin-top: 5px;">JALR Function Calls</p>
+        </div>
+        <div style="background: #0f2215; padding: 15px; border-radius: 10px; border-left: 4px solid #cc88ff;">
+            <p style="color: #fff; font-weight: bold; margin: 0;">🖥️ 4. Display</p>
+            <p style="color: #aaa; font-size: 0.9em; margin-top: 5px;">Memory-Mapped I/O</p>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # IoT Device Configuration
 st.subheader("⚙️ IoT Device Configuration")
@@ -1405,8 +1525,9 @@ baseline_energy_mj = baseline_time_per_day_s * active_power_mw
 fused_energy_mj = fused_time_per_day_s * active_power_mw
 energy_saved_mj = baseline_energy_mj - fused_energy_mj
 
-# Battery life calculation (typical CR2032: 225mAh @ 3V = 675mWh = 675,000 mJ)
-battery_capacity_mj = 675_000
+# Battery life calculation (typical CR2032: 225mAh @ 3V = 675mWh)
+# 1 mWh = 3.6 J = 3600 mJ
+battery_capacity_mj = 675 * 3600  # = 2,430,000 mJ
 
 # Daily total energy (processing + idle for rest of day)
 idle_time_baseline = 86400 - baseline_time_per_day_s
@@ -1644,7 +1765,7 @@ with fusion_breakdown_col2:
         <div style="background: linear-gradient(135deg, #1a2a1a 0%, #16213e 100%); box-shadow: 0 4px 24px #0008; padding: 24px 18px 18px 18px; border-radius: 18px; border: 2px solid #00ff88; margin-bottom: 10px;">
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
                 <span style="font-size: 2em; color: #00ff88;">🌱</span>
-                <span style="color: #00ff88; font-size: 1.25em; font-weight: bold; letter-spacing: 0.5px;">Macro-Op Fusion: Real IoT Impact</span>
+                <span style="color: #00ff88; font-size: 1.25em; font-weight: bold; letter-spacing: 0.5px;">Micro-Op Fusion: Real IoT Impact</span>
             </div>
             <div style="margin-bottom: 18px;">
                 <div style="background: #16213e; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; border-left: 4px solid #00ff88;">
@@ -1673,15 +1794,22 @@ st.subheader("📅 Annual Impact Projection")
 annual_col1, annual_col2, annual_col3, annual_col4 = st.columns(4)
 
 annual_cycles_saved = cycles_saved_per_day * 365
-annual_energy_saved_j = energy_saved_mj * 365 / 1000  # Convert to Joules
+annual_energy_saved_mj = energy_saved_mj * 365  # milliJoules per year
+# Convert mJ to Wh: 1 Wh = 3600 J = 3,600,000 mJ
+annual_energy_saved_wh = annual_energy_saved_mj / 3_600_000  # Watt-hours per device per year
 annual_time_saved_hrs = time_saved_per_day_s * 365 / 3600
 
 # Fleet calculation
 fleet_size = st.number_input("📦 Fleet Size (number of devices)", min_value=1, max_value=100000, value=1000, step=100)
 
 fleet_cycles_saved = annual_cycles_saved * fleet_size
-fleet_energy_saved_kwh = annual_energy_saved_j * fleet_size / 3_600_000  # Convert J to kWh
-fleet_batteries_saved = extra_battery_days * fleet_size / 365  # Number of battery replacements saved per year
+fleet_energy_saved_wh = annual_energy_saved_wh * fleet_size  # In Wh
+fleet_energy_saved_kwh = fleet_energy_saved_wh / 1000  # Convert to kWh
+
+# Direct battery replacement calculation based on energy saved
+# Battery capacity in Wh = 0.675 Wh (675 mWh)
+battery_capacity_wh = 0.675
+fleet_batteries_saved = fleet_energy_saved_wh / battery_capacity_wh
 
 with annual_col1:
     st.metric("🔄 Annual Cycles Saved (per device)", f"{annual_cycles_saved:,.0f}", f"{(annual_cycles_saved/baseline_cycles_per_day/365*100):.1f}% efficiency gain")
@@ -1690,7 +1818,11 @@ with annual_col2:
     st.metric("⏱️ Active Time Saved/Year", f"{annual_time_saved_hrs:.1f} hrs", "Per device")
 
 with annual_col3:
-    st.metric("🔋 Fleet Energy Saved", f"{fleet_energy_saved_kwh:.2f} kWh", f"For {fleet_size:,} devices")
+    # Display in appropriate units based on magnitude
+    if fleet_energy_saved_kwh >= 1:
+        st.metric("🔋 Fleet Energy Saved", f"{fleet_energy_saved_kwh:.2f} kWh", f"For {fleet_size:,} devices")
+    else:
+        st.metric("🔋 Fleet Energy Saved", f"{fleet_energy_saved_wh:.1f} Wh", f"For {fleet_size:,} devices")
 
 with annual_col4:
     st.metric("💰 Battery Replacements Saved", f"{fleet_batteries_saved:.0f}", f"~${fleet_batteries_saved * 3:.0f} saved")
@@ -1715,18 +1847,17 @@ st.markdown(f"""
                 <p style="color: #888; margin: 0;">Fewer battery swaps/year ({fleet_size:,} devices)</p>
             </td>
             <td style="padding: 10px;">
-                <p style="color: #00ff88; font-size: 1.5em; margin: 0; font-weight: bold;">{fleet_energy_saved_kwh:.1f} kWh</p>
+                <p style="color: #00ff88; font-size: 1.5em; margin: 0; font-weight: bold;">{f"{fleet_energy_saved_kwh:.2f} kWh" if fleet_energy_saved_kwh >= 1 else f"{fleet_energy_saved_wh:.1f} Wh"}</p>
                 <p style="color: #888; margin: 0;">Annual fleet energy savings</p>
             </td>
         </tr>
     </table>
     <p style="color: #00aa55; margin-top: 15px; font-size: 0.95em;">
-        <strong>Key Insight:</strong> Macro-Op Fusion is especially effective for IoT workloads because they are dominated by 
+        <strong>Key Insight:</strong> Micro-Op Fusion is especially effective for IoT workloads because they are dominated by 
         memory-mapped I/O operations (constant loading), sensor data processing (load-use patterns), and modular function 
         calls - exactly the patterns our fusion decoder optimizes!
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-st.markdown("---")
-st.caption("🔬 RV32I Multi-Pattern Macro-Op Fusion Processor Dashboard | Supports LUI+ADDI, AUIPC+JALR, LOAD+ALU Fusion | Built with Streamlit & Plotly")
+

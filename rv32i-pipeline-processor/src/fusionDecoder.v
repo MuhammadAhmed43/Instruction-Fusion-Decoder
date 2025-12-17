@@ -81,13 +81,19 @@ wire is_load = (opcode1 == OP_LOAD);
 wire is_alu_rtype = (opcode2 == OP_RTYPE);
 wire is_alu_itype = (opcode2 == OP_ADDI);  // I-type ALU
 
-// Check if load result is used immediately
+// Check if load result is used immediately (Pattern B: Load-Use)
 wire load_used_as_rs1 = (rd1 == rs1_inst2) && (rd1 != 5'b0);
 wire load_used_as_rs2 = is_alu_rtype && (rd1 == rs2_inst2) && (rd1 != 5'b0);
 
+// Check if load destination matches ALU destination (Pattern A: Load-Overwrite)
+wire load_same_dest = (rd1 == rd2) && (rd1 != 5'b0);
+
+// Load+ALU fusion enabled - detects BOTH patterns:
+// Pattern A: lw x9 -> add x9, ... (same destination)
+// Pattern B: lw x9 -> add x10, x9, ... (load used as source)
 wire load_alu_match = is_load &&
                       (is_alu_rtype || is_alu_itype) &&
-                      (load_used_as_rs1 || load_used_as_rs2);
+                      (load_used_as_rs1 || load_used_as_rs2 || load_same_dest);
 
 // =============================================================================
 // FUSION OUTPUT LOGIC

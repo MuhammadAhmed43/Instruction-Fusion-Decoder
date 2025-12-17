@@ -61,6 +61,11 @@ module core #(
 
     // Apply fusion only when enabled
     assign fuse_flag = fuse_flag_raw & FUSION_ENABLE;
+    
+    // IMPORTANT: Load+ALU fusion (fuse_type=11) should NOT skip the second instruction!
+    // Load+ALU fusion works by forwarding loaded data, both instructions still execute.
+    // Only LUI+ADDI (01) and AUIPC+JALR (10) skip the second instruction.
+    wire fuse_flag_skip = fuse_flag && (fuse_type != 2'b11);
 
     // ==========================================================================
     // HAZARD DETECTION (Artificial Stalls for Baseline Comparison)
@@ -97,8 +102,8 @@ module core #(
     wire load_alu_hazard = load_alu_hazard_rs1 | load_alu_hazard_rs2;
 
     // Combined hazard stall (only when fusion is disabled)
-    assign hazard_stall = !FUSION_ENABLE && 
-                          (lui_addi_hazard | auipc_jalr_hazard | load_alu_hazard);
+    // When fusion is ENABLED, Load+ALU patterns are handled by forwarding loaded data
+    assign hazard_stall = (!FUSION_ENABLE) && (lui_addi_hazard | auipc_jalr_hazard | load_alu_hazard);
 
     //FETCH STAGE
     fetch u_fetchstage(
@@ -108,7 +113,7 @@ module core #(
         .jalr(jalr_execute),
         .next_sel(next_sel_execute),
         .branch_reselt(branch_result_execute),
-        .fuse_skip(fuse_flag),
+        .fuse_skip(fuse_flag_skip),
         .next_address(alu_res_out_execute),
         .instruction_fetch(instruction),
         .instruction(instruction_fetch),
@@ -133,7 +138,7 @@ module core #(
         .branch_result(branch_result_decode),
         .jalr(jalr_decode),
         .load(load_decode | hazard_stall), // Stall Fetch Pipe
-        .fuse_flush(fuse_flag)
+        .fuse_flush(fuse_flag_skip)
     );
 
     // FUSION DECODER
@@ -222,8 +227,22 @@ module core #(
         .operand_b_out(operand_b_execute)
     );
 
-    assign alu_in_a = (!operand_a_execute && rs1_execute == rd_memstage)? alu_res_out_memstage : opa_mux_out_execute;
-    assign alu_in_b = (!operand_b_execute && rs2_execute == rd_memstage)? alu_res_out_memstage : opb_mux_out_execute;
+    // Detect if instruction in Memory stage is a Load (opcode 0000011)
+    wire load_in_memstage = (instruction_memstage[6:0] == 7'b0000011);
+    
+    // Select correct data from Memory stage: loaded data for Loads, ALU result otherwise
+    wire [31:0] mem_forward_data = load_in_memstage ? wrap_load_memstage : alu_res_out_memstage;
+
+    // Forwarding logic with MEM and WB stages
+    // For Load instructions in MEM stage, forward the loaded data (wrap_load_memstage)
+    // For other instructions in MEM stage, forward the ALU result (alu_res_out_memstage)
+    assign alu_in_a = (!operand_a_execute && rs1_execute == rd_memstage && reg_write_memstage && rd_memstage != 0) ? mem_forward_data : 
+                      (!operand_a_execute && rs1_execute == instruction_wb[11:7] && reg_write_wb && instruction_wb[11:7] != 0) ? rd_wb_data :
+                      opa_mux_out_execute;
+
+    assign alu_in_b = (!operand_b_execute && rs2_execute == rd_memstage && reg_write_memstage && rd_memstage != 0) ? mem_forward_data :
+                      (!operand_b_execute && rs2_execute == instruction_wb[11:7] && reg_write_wb && instruction_wb[11:7] != 0) ? rd_wb_data :
+                      opb_mux_out_execute;
 
     //EXECUTE STAGE
     execute u_executestage(
