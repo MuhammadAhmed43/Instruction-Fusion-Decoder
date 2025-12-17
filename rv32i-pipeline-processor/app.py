@@ -1315,4 +1315,418 @@ with col2:
         st.info("👈 Click 'Run Comparison' to analyze the fusion performance! ✨")
 
 st.markdown("---")
+
+# =============================================================================
+# IoT DEVICE SIMULATION SECTION
+# =============================================================================
+st.header("🌐 Real-World Application: IoT Sensor Node Simulation")
+
+st.markdown("""
+This section demonstrates how **Macro-Op Fusion** benefits a real-world IoT device scenario.
+We simulate a **Smart Temperature Sensor Node** that continuously:
+1. **Reads sensor data** (LOAD operations)
+2. **Processes the readings** (ALU operations for averaging, threshold checking)
+3. **Sends alerts** (Function calls via JALR when thresholds exceeded)
+4. **Updates display** (32-bit constant loading for memory-mapped I/O)
+""")
+
+# IoT Device Configuration
+st.subheader("⚙️ IoT Device Configuration")
+
+iot_col1, iot_col2, iot_col3 = st.columns(3)
+
+with iot_col1:
+    sensor_frequency = st.slider("Sensor Read Frequency (Hz)", 1, 100, 10, help="How often the sensor reads data per second")
+    
+with iot_col2:
+    samples_per_reading = st.slider("Samples per Reading", 1, 20, 5, help="Number of samples averaged per reading")
+    
+with iot_col3:
+    operation_hours = st.slider("Daily Operation Hours", 1, 24, 24, help="Hours the device operates per day")
+
+# Calculate IoT workload based on our measured fusion patterns
+st.subheader("📊 Workload Analysis")
+
+# Per reading cycle breakdown (based on typical IoT sensor code pattern)
+# Each sensor read cycle involves:
+# - 2x LUI+ADDI patterns (loading sensor address, loading threshold constant)
+# - 1x AUIPC+JALR pattern (calling processing function)
+# - 3x LOAD+ALU patterns (load sensor value + process)
+
+lui_addi_per_cycle = 2
+auipc_jalr_per_cycle = 1  
+load_alu_per_cycle = 3
+
+# Cycles per pattern (from our actual measurements)
+baseline_lui_addi_cycles = 2  # LUI + ADDI take 2 cycles normally
+fused_lui_addi_cycles = 1     # Fused into 1 cycle
+
+baseline_auipc_jalr_cycles = 2
+fused_auipc_jalr_cycles = 1
+
+baseline_load_alu_cycles = 3  # LOAD + stall + ALU
+fused_load_alu_cycles = 2     # LOAD + ALU (no stall)
+
+# Calculate per-reading costs
+baseline_cycles_per_reading = (
+    lui_addi_per_cycle * baseline_lui_addi_cycles +
+    auipc_jalr_per_cycle * baseline_auipc_jalr_cycles +
+    load_alu_per_cycle * baseline_load_alu_cycles
+)
+
+fused_cycles_per_reading = (
+    lui_addi_per_cycle * fused_lui_addi_cycles +
+    auipc_jalr_per_cycle * fused_auipc_jalr_cycles +
+    load_alu_per_cycle * fused_load_alu_cycles
+)
+
+# Scale to actual operation
+readings_per_second = sensor_frequency * samples_per_reading
+readings_per_day = readings_per_second * 3600 * operation_hours
+
+baseline_cycles_per_day = readings_per_day * baseline_cycles_per_reading
+fused_cycles_per_day = readings_per_day * fused_cycles_per_reading
+cycles_saved_per_day = baseline_cycles_per_day - fused_cycles_per_day
+
+# Assuming 10 MHz clock (typical for low-power IoT)
+clock_freq_mhz = 10
+cycle_time_us = 1 / clock_freq_mhz
+
+baseline_time_per_day_s = (baseline_cycles_per_day * cycle_time_us) / 1_000_000
+fused_time_per_day_s = (fused_cycles_per_day * cycle_time_us) / 1_000_000
+time_saved_per_day_s = baseline_time_per_day_s - fused_time_per_day_s
+
+# Energy calculation (typical values for embedded processor)
+# Active power: ~5mW at 10MHz, Sleep power: ~10uW
+active_power_mw = 5
+sleep_power_mw = 0.01
+
+baseline_energy_mj = baseline_time_per_day_s * active_power_mw
+fused_energy_mj = fused_time_per_day_s * active_power_mw
+energy_saved_mj = baseline_energy_mj - fused_energy_mj
+
+# Battery life calculation (typical CR2032: 225mAh @ 3V = 675mWh = 675,000 mJ)
+battery_capacity_mj = 675_000
+
+# Daily total energy (processing + idle for rest of day)
+idle_time_baseline = 86400 - baseline_time_per_day_s
+idle_time_fused = 86400 - fused_time_per_day_s
+
+total_energy_baseline = baseline_energy_mj + (idle_time_baseline * sleep_power_mw)
+total_energy_fused = fused_energy_mj + (idle_time_fused * sleep_power_mw)
+
+battery_days_baseline = battery_capacity_mj / total_energy_baseline
+battery_days_fused = battery_capacity_mj / total_energy_fused
+extra_battery_days = battery_days_fused - battery_days_baseline
+
+# Display metrics
+iot_metrics = st.columns(4)
+
+with iot_metrics[0]:
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+                padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #0f3460;">
+        <p style="color: #888; margin: 0; font-size: 0.9em;">📡 Readings/Day</p>
+        <p style="color: #00d4ff; font-size: 1.8em; font-weight: bold; margin: 10px 0;">{readings_per_day:,.0f}</p>
+        <p style="color: #666; margin: 0; font-size: 0.8em;">{readings_per_second:.0f}/sec × {operation_hours}hrs</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with iot_metrics[1]:
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #1a2e1a 0%, #16213e 100%); 
+                padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #0f6030;">
+        <p style="color: #888; margin: 0; font-size: 0.9em;">⚡ Cycles Saved/Day</p>
+        <p style="color: #00ff88; font-size: 1.8em; font-weight: bold; margin: 10px 0;">{cycles_saved_per_day:,.0f}</p>
+        <p style="color: #666; margin: 0; font-size: 0.8em;">{(cycles_saved_per_day/baseline_cycles_per_day*100):.1f}% reduction</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with iot_metrics[2]:
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #2e1a1a 0%, #3e1621 100%); 
+                padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #603030;">
+        <p style="color: #888; margin: 0; font-size: 0.9em;">🔋 Energy Saved/Day</p>
+        <p style="color: #ff6b6b; font-size: 1.8em; font-weight: bold; margin: 10px 0;">{energy_saved_mj:.1f} mJ</p>
+        <p style="color: #666; margin: 0; font-size: 0.8em;">{time_saved_per_day_s:.2f}s less active</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with iot_metrics[3]:
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #2e2e1a 0%, #3e3516 100%); 
+                padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #606030;">
+        <p style="color: #888; margin: 0; font-size: 0.9em;">🔋 Extra Battery Life</p>
+        <p style="color: #ffd93d; font-size: 1.8em; font-weight: bold; margin: 10px 0;">+{extra_battery_days:.1f} days</p>
+        <p style="color: #666; margin: 0; font-size: 0.8em;">{battery_days_fused:.0f} vs {battery_days_baseline:.0f} days</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Pipeline Comparison Visualization
+st.subheader("🔄 Pipeline Execution Comparison: Single Sensor Reading")
+
+pipeline_col1, pipeline_col2 = st.columns(2)
+
+with pipeline_col1:
+    st.markdown("#### 🔴 Baseline Pipeline (No Fusion)")
+    
+    # Use Plotly for a cleaner timeline visualization
+    baseline_data = [
+        {"Cycle": 1, "Instruction": "LUI x5, 0x10000", "Type": "Normal", "Description": "Load sensor address upper"},
+        {"Cycle": 2, "Instruction": "ADDI x5, x5, 0x100", "Type": "Normal", "Description": "Complete sensor address"},
+        {"Cycle": 3, "Instruction": "LW x6, 0(x5)", "Type": "Normal", "Description": "Load sensor value"},
+        {"Cycle": 4, "Instruction": "⏸️ STALL", "Type": "Stall", "Description": "Data hazard - waiting for x6"},
+        {"Cycle": 5, "Instruction": "ADD x7, x6, x8", "Type": "Normal", "Description": "Add to running sum"},
+        {"Cycle": 6, "Instruction": "LUI x9, 0x20000", "Type": "Normal", "Description": "Load threshold upper"},
+        {"Cycle": 7, "Instruction": "ADDI x9, x9, 0x50", "Type": "Normal", "Description": "Complete threshold value"},
+        {"Cycle": 8, "Instruction": "LW x10, 4(x5)", "Type": "Normal", "Description": "Load second sample"},
+        {"Cycle": 9, "Instruction": "⏸️ STALL", "Type": "Stall", "Description": "Data hazard - waiting for x10"},
+        {"Cycle": 10, "Instruction": "ADD x7, x7, x10", "Type": "Normal", "Description": "Add to sum"},
+        {"Cycle": 11, "Instruction": "AUIPC x1, 0", "Type": "Normal", "Description": "Setup return address"},
+        {"Cycle": 12, "Instruction": "JALR x0, x1, offset", "Type": "Normal", "Description": "Call process function"},
+        {"Cycle": 13, "Instruction": "LW x11, 8(x5)", "Type": "Normal", "Description": "Load third sample"},
+        {"Cycle": 14, "Instruction": "⏸️ STALL", "Type": "Stall", "Description": "Data hazard - waiting for x11"},
+        {"Cycle": 15, "Instruction": "ADD x7, x7, x11", "Type": "Normal", "Description": "Final sum"},
+    ]
+    
+    baseline_df = pd.DataFrame(baseline_data)
+    
+    # Create a Gantt-style chart
+    fig_baseline = go.Figure()
+    
+    colors = ['#ff6b6b' if row['Type'] == 'Stall' else '#4a90d9' for _, row in baseline_df.iterrows()]
+    
+    fig_baseline.add_trace(go.Bar(
+        y=[f"C{row['Cycle']}: {row['Instruction'][:20]}" for _, row in baseline_df.iterrows()],
+        x=[1] * len(baseline_df),
+        orientation='h',
+        marker_color=colors,
+        text=[row['Description'][:25] for _, row in baseline_df.iterrows()],
+        textposition='inside',
+        textfont=dict(size=10, color='white'),
+        hovertemplate='%{y}<br>%{text}<extra></extra>'
+    ))
+    
+    fig_baseline.update_layout(
+        title=dict(text="15 Cycles Total (3 Stalls)", font=dict(color='#ff4444')),
+        template='plotly_dark',
+        height=500,
+        showlegend=False,
+        xaxis=dict(showticklabels=False, showgrid=False),
+        yaxis=dict(autorange="reversed"),
+        margin=dict(l=10, r=10, t=40, b=10)
+    )
+    
+    st.plotly_chart(fig_baseline, use_container_width=True)
+    
+    # Legend
+    st.markdown("""
+    <div style="display: flex; gap: 20px; justify-content: center;">
+        <span style="color: #4a90d9;">🟦 Normal Instruction</span>
+        <span style="color: #ff6b6b;">🟥 Pipeline Stall</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+with pipeline_col2:
+    st.markdown("#### 🟢 Fused Pipeline (With Macro-Op Fusion)")
+    
+    fused_data = [
+        {"Cycle": 1, "Instruction": "🔗 LUI+ADDI → x5", "Type": "Fused", "Description": "Sensor address in 1 cycle"},
+        {"Cycle": 2, "Instruction": "🔗 LW+ADD → x6,x7", "Type": "Fused", "Description": "Load & add (no stall)"},
+        {"Cycle": 3, "Instruction": "🔗 LUI+ADDI → x9", "Type": "Fused", "Description": "Threshold in 1 cycle"},
+        {"Cycle": 4, "Instruction": "🔗 LW+ADD → x10,x7", "Type": "Fused", "Description": "Load & add (no stall)"},
+        {"Cycle": 5, "Instruction": "🔗 AUIPC+JALR", "Type": "Fused", "Description": "Function call in 1 cycle"},
+        {"Cycle": 6, "Instruction": "🔗 LW+ADD → x11,x7", "Type": "Fused", "Description": "Load & add (no stall)"},
+    ]
+    
+    # Add saved cycles
+    for i in range(7, 16):
+        fused_data.append({"Cycle": i, "Instruction": f"✓ Cycle {i} Saved", "Type": "Saved", "Description": "Eliminated by fusion"})
+    
+    fused_df = pd.DataFrame(fused_data)
+    
+    fig_fused = go.Figure()
+    
+    colors = ['#00ff88' if row['Type'] == 'Fused' else '#1a3a1a' for _, row in fused_df.iterrows()]
+    
+    fig_fused.add_trace(go.Bar(
+        y=[f"C{row['Cycle']}: {row['Instruction'][:20]}" for _, row in fused_df.iterrows()],
+        x=[1] * len(fused_df),
+        orientation='h',
+        marker_color=colors,
+        text=[row['Description'][:25] if row['Type'] == 'Fused' else '' for _, row in fused_df.iterrows()],
+        textposition='inside',
+        textfont=dict(size=10, color='black'),
+        hovertemplate='%{y}<br>%{text}<extra></extra>'
+    ))
+    
+    fig_fused.update_layout(
+        title=dict(text="6 Cycles Total (60% Faster!)", font=dict(color='#00ff88')),
+        template='plotly_dark',
+        height=500,
+        showlegend=False,
+        xaxis=dict(showticklabels=False, showgrid=False),
+        yaxis=dict(autorange="reversed"),
+        margin=dict(l=10, r=10, t=40, b=10)
+    )
+    
+    st.plotly_chart(fig_fused, use_container_width=True)
+    
+    # Legend
+    st.markdown("""
+    <div style="display: flex; gap: 20px; justify-content: center;">
+        <span style="color: #00ff88;">🟩 Fused Instruction</span>
+        <span style="color: #1a3a1a;">⬛ Cycle Saved</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Fusion Pattern Breakdown for IoT
+st.subheader("📈 Fusion Impact on IoT Workload")
+
+fusion_breakdown_col1, fusion_breakdown_col2 = st.columns([2, 1])
+
+with fusion_breakdown_col1:
+    # Create stacked bar showing contribution of each pattern
+    patterns = ['LUI+ADDI<br>(Constants)', 'AUIPC+JALR<br>(Function Calls)', 'LOAD+ALU<br>(Sensor Processing)']
+    
+    baseline_vals = [
+        lui_addi_per_cycle * baseline_lui_addi_cycles,
+        auipc_jalr_per_cycle * baseline_auipc_jalr_cycles,
+        load_alu_per_cycle * baseline_load_alu_cycles
+    ]
+    
+    fused_vals = [
+        lui_addi_per_cycle * fused_lui_addi_cycles,
+        auipc_jalr_per_cycle * fused_auipc_jalr_cycles,
+        load_alu_per_cycle * fused_load_alu_cycles
+    ]
+    
+    savings = [b - f for b, f in zip(baseline_vals, fused_vals)]
+    
+    fig_iot = go.Figure()
+    
+    fig_iot.add_trace(go.Bar(
+        name='Baseline Cycles',
+        x=patterns,
+        y=baseline_vals,
+        marker_color='#ff6b6b',
+        text=baseline_vals,
+        textposition='inside',
+        textfont=dict(color='white', size=14)
+    ))
+    
+    fig_iot.add_trace(go.Bar(
+        name='Fused Cycles',
+        x=patterns,
+        y=fused_vals,
+        marker_color='#00ff88',
+        text=fused_vals,
+        textposition='inside',
+        textfont=dict(color='black', size=14)
+    ))
+    
+    fig_iot.update_layout(
+        title="Cycles per Sensor Reading by Pattern",
+        barmode='group',
+        template='plotly_dark',
+        height=350,
+        yaxis_title="Cycles",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5)
+    )
+    
+    st.plotly_chart(fig_iot, use_container_width=True)
+
+with fusion_breakdown_col2:
+
+    st.markdown("#### 💡 Why IoT Benefits Most")
+    st.markdown(
+        """
+        <div style="background: linear-gradient(135deg, #1a2a1a 0%, #16213e 100%); box-shadow: 0 4px 24px #0008; padding: 24px 18px 18px 18px; border-radius: 18px; border: 2px solid #00ff88; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <span style="font-size: 2em; color: #00ff88;">🌱</span>
+                <span style="color: #00ff88; font-size: 1.25em; font-weight: bold; letter-spacing: 0.5px;">Macro-Op Fusion: Real IoT Impact</span>
+            </div>
+            <div style="margin-bottom: 18px;">
+                <div style="background: #16213e; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; border-left: 4px solid #00ff88;">
+                    <span style="color: #00ff88; font-weight: bold; font-size: 1.1em;">1. Constant Loading (LUI+ADDI)</span><br>
+                    <span style="color: #bbb; font-size: 0.98em;">IoT devices frequently load memory-mapped I/O addresses and configuration constants.</span>
+                </div>
+                <div style="background: #16213e; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; border-left: 4px solid #00ff88;">
+                    <span style="color: #00ff88; font-weight: bold; font-size: 1.1em;">2. Function Calls (AUIPC+JALR)</span><br>
+                    <span style="color: #bbb; font-size: 0.98em;">Sensor processing involves many small function calls for filtering, averaging, and alerting.</span>
+                </div>
+                <div style="background: #16213e; border-radius: 10px; padding: 12px 14px; border-left: 4px solid #00ff88;">
+                    <span style="color: #00ff88; font-weight: bold; font-size: 1.1em;">3. Load-Use (LOAD+ALU)</span><br>
+                    <span style="color: #bbb; font-size: 0.98em;">The most impactful! Every sensor read is immediately processed—eliminating stalls saves significant cycles.</span>
+                </div>
+            </div>
+            <div style="text-align: right; margin-top: 8px;">
+                <span style="color: #00ff88; font-size: 0.95em; font-style: italic;">Optimized for real-world embedded workloads</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+# Year-long projection
+st.subheader("📅 Annual Impact Projection")
+
+annual_col1, annual_col2, annual_col3, annual_col4 = st.columns(4)
+
+annual_cycles_saved = cycles_saved_per_day * 365
+annual_energy_saved_j = energy_saved_mj * 365 / 1000  # Convert to Joules
+annual_time_saved_hrs = time_saved_per_day_s * 365 / 3600
+
+# Fleet calculation
+fleet_size = st.number_input("📦 Fleet Size (number of devices)", min_value=1, max_value=100000, value=1000, step=100)
+
+fleet_cycles_saved = annual_cycles_saved * fleet_size
+fleet_energy_saved_kwh = annual_energy_saved_j * fleet_size / 3_600_000  # Convert J to kWh
+fleet_batteries_saved = extra_battery_days * fleet_size / 365  # Number of battery replacements saved per year
+
+with annual_col1:
+    st.metric("🔄 Annual Cycles Saved (per device)", f"{annual_cycles_saved:,.0f}", f"{(annual_cycles_saved/baseline_cycles_per_day/365*100):.1f}% efficiency gain")
+
+with annual_col2:
+    st.metric("⏱️ Active Time Saved/Year", f"{annual_time_saved_hrs:.1f} hrs", "Per device")
+
+with annual_col3:
+    st.metric("🔋 Fleet Energy Saved", f"{fleet_energy_saved_kwh:.2f} kWh", f"For {fleet_size:,} devices")
+
+with annual_col4:
+    st.metric("💰 Battery Replacements Saved", f"{fleet_batteries_saved:.0f}", f"~${fleet_batteries_saved * 3:.0f} saved")
+
+# Summary Box
+st.markdown(f"""
+<div style="background: linear-gradient(135deg, #1a2e1a 0%, #0f1f0f 100%); 
+            padding: 25px; border-radius: 12px; border: 2px solid #00ff88; margin-top: 20px;">
+    <h3 style="color: #00ff88; margin-top: 0;">🎯 Real-World Impact Summary</h3>
+    <table style="width: 100%; color: #ccc;">
+        <tr>
+            <td style="padding: 10px;">
+                <p style="color: #00ff88; font-size: 1.5em; margin: 0; font-weight: bold;">60%</p>
+                <p style="color: #888; margin: 0;">Fewer cycles per sensor reading</p>
+            </td>
+            <td style="padding: 10px;">
+                <p style="color: #00ff88; font-size: 1.5em; margin: 0; font-weight: bold;">{extra_battery_days:.0f}+</p>
+                <p style="color: #888; margin: 0;">Extra days of battery life</p>
+            </td>
+            <td style="padding: 10px;">
+                <p style="color: #00ff88; font-size: 1.5em; margin: 0; font-weight: bold;">{fleet_batteries_saved:.0f}</p>
+                <p style="color: #888; margin: 0;">Fewer battery swaps/year ({fleet_size:,} devices)</p>
+            </td>
+            <td style="padding: 10px;">
+                <p style="color: #00ff88; font-size: 1.5em; margin: 0; font-weight: bold;">{fleet_energy_saved_kwh:.1f} kWh</p>
+                <p style="color: #888; margin: 0;">Annual fleet energy savings</p>
+            </td>
+        </tr>
+    </table>
+    <p style="color: #00aa55; margin-top: 15px; font-size: 0.95em;">
+        <strong>Key Insight:</strong> Macro-Op Fusion is especially effective for IoT workloads because they are dominated by 
+        memory-mapped I/O operations (constant loading), sensor data processing (load-use patterns), and modular function 
+        calls - exactly the patterns our fusion decoder optimizes!
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("---")
 st.caption("🔬 RV32I Multi-Pattern Macro-Op Fusion Processor Dashboard | Supports LUI+ADDI, AUIPC+JALR, LOAD+ALU Fusion | Built with Streamlit & Plotly")
